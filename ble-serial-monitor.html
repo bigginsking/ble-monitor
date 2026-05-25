@@ -300,8 +300,8 @@
       $('connectBtn').textContent = '…';
 
       device = await navigator.bluetooth.requestDevice({
-        filters: [{ services: [SERVICE_UUID] }],
-        optionalServices: [SERVICE_UUID]
+        acceptAllDevices: true,
+        optionalServices: [SERVICE_UUID, CHAR_UUID]
       });
       device.addEventListener('gattserverdisconnected', onDisconnect);
 
@@ -318,8 +318,16 @@
       $('connectBtn').textContent = 'Disconnect';
       sys(`Connected to ${device.name || 'device'} — subscribed to FFE1, decoding UTF-8.`);
     } catch (e) {
-      if (e && e.name === 'NotFoundError') { sys('Device selection cancelled.'); }
-      else { err('Connect failed: ' + (e.message || e)); }
+      const name = (e && e.name) || '';
+      if (name === 'NotFoundError') {
+        sys('No device chosen (picker cancelled, or no devices found nearby).');
+      } else if (name === 'SecurityError') {
+        err('Blocked: page must be HTTPS and Bluefy needs iOS Bluetooth permission (Settings → Bluefy → Bluetooth = ON).');
+      } else if (name === 'NotAllowedError') {
+        err('Bluetooth permission denied. Enable it in Settings → Bluefy → Bluetooth, then retry.');
+      } else {
+        err(`Connect failed [${name || 'unknown'}]: ${e && e.message ? e.message : e}`);
+      }
       resetUi();
     }
   }
