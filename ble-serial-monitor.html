@@ -218,9 +218,9 @@
 (() => {
   'use strict';
 
-  // ---- HM-10 GATT identifiers ----
-  const SERVICE_UUID = 0xffe0;
-  const CHAR_UUID    = 0xffe1;
+  // ---- HM-10 GATT identifiers (full 128-bit form for max compatibility) ----
+  const SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb';
+  const CHAR_UUID    = '0000ffe1-0000-1000-8000-00805f9b34fb';
 
   // ---- State ----
   let device = null, server = null, characteristic = null;
@@ -303,13 +303,18 @@
         acceptAllDevices: true,
         optionalServices: [SERVICE_UUID, CHAR_UUID]
       });
+      sys(`Step 1 OK — selected "${device.name || 'unnamed device'}".`);
       device.addEventListener('gattserverdisconnected', onDisconnect);
 
       setStatus('connecting', 'Connecting…');
       server = await device.gatt.connect();
+      sys('Step 2 OK — GATT connected.');
       const service = await server.getPrimaryService(SERVICE_UUID);
+      sys('Step 3 OK — found FFE0 service.');
       characteristic = await service.getCharacteristic(CHAR_UUID);
+      sys('Step 4 OK — found FFE1 characteristic.');
       await characteristic.startNotifications();
+      sys('Step 5 OK — notifications on.');
       characteristic.addEventListener('characteristicvaluechanged', onData);
 
       setStatus('live', 'Connected');
