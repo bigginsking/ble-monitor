@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>BLE Serial Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0e0d;
+    --panel:     #111715;
+    --grid:      #16201d;
+    --line:      #1d2b27;
+    --ink:       #c8e6d8;
+    --ink-dim:   #5d7a70;
+    --phos:      #34e89e;
+    --phos-dim:  #1c7a55;
+    --amber:     #e8b834;
+    --rx:        #34e89e;
+    --tx:        #4ea8e8;
+    --err:       #e85d5d;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --display: 'Space Mono', var(--mono);
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--mono);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    display: flex; flex-direction: column;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 22px 22px;
+    background-position: center;
+  }
+
+  /* ---- Header ---- */
+  header {
+    flex: 0 0 auto;
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(15,22,20,.95), rgba(10,14,13,.85));
+    backdrop-filter: blur(6px);
+  }
+  .titlebar { display: flex; align-items: center; gap: 10px; }
+  .titlebar h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 15px; letter-spacing: .14em;
+    text-transform: uppercase;
+    margin: 0; color: var(--ink);
+  }
+  .titlebar .tag {
+    font-size: 10px; letter-spacing: .18em; color: var(--phos-dim);
+    border: 1px solid var(--line); border-radius: 3px;
+    padding: 2px 6px; margin-left: auto;
+  }
+
+  .statusline {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 10px; font-size: 12px; color: var(--ink-dim);
+  }
+  .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--err); flex: 0 0 auto;
+    box-shadow: 0 0 0 0 rgba(232,93,93,.5);
+  }
+  .dot.live {
+    background: var(--phos);
+    animation: pulse 2s infinite;
+  }
+  .dot.connecting { background: var(--amber); animation: blink .7s infinite; }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(52,232,158,.45); }
+    70%  { box-shadow: 0 0 0 7px rgba(52,232,158,0); }
+    100% { box-shadow: 0 0 0 0 rgba(52,232,158,0); }
+  }
+  @keyframes blink { 50% { opacity: .3; } }
+  #statusText { color: var(--ink); }
+  #deviceName { color: var(--phos); }
+
+  /* ---- Console ---- */
+  #console {
+    flex: 1 1 auto; overflow-y: auto; overflow-x: hidden;
+    padding: 12px 14px 16px;
+    font-size: 13px; line-height: 1.55;
+    -webkit-overflow-scrolling: touch;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .row { display: flex; gap: 10px; padding: 1px 0; animation: fadein .18s ease; }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  .ts {
+    flex: 0 0 auto; color: var(--ink-dim); font-size: 11px;
+    padding-top: 1px; user-select: none;
+  }
+  .ts.hide { display: none; }
+  .msg { flex: 1 1 auto; }
+  .msg.rx  { color: var(--rx); }
+  .msg.tx  { color: var(--tx); }
+  .msg.sys { color: var(--ink-dim); font-style: italic; }
+  .msg.err { color: var(--err); }
+  .msg.tx::before  { content: '» '; color: var(--tx); opacity:.6; }
+  .msg.sys::before { content: '· '; opacity:.6; }
+
+  #cursor {
+    display: inline-block; width: 8px; height: 15px;
+    background: var(--phos); vertical-align: text-bottom;
+    margin-left: 2px; animation: blink 1.1s steps(1) infinite;
+  }
+
+  /* ---- Footer controls ---- */
+  footer {
+    flex: 0 0 auto;
+    border-top: 1px solid var(--line);
+    background: linear-gradient(0deg, rgba(15,22,20,.96), rgba(10,14,13,.8));
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    backdrop-filter: blur(6px);
+  }
+
+  .stats {
+    display: flex; gap: 16px; font-size: 10.5px; color: var(--ink-dim);
+    letter-spacing: .06em; margin-bottom: 9px;
+  }
+  .stats b { color: var(--phos); font-weight: 600; }
+
+  .sendrow { display: flex; gap: 8px; margin-bottom: 9px; }
+  #txInput {
+    flex: 1 1 auto; min-width: 0;
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 7px; color: var(--ink);
+    font-family: var(--mono); font-size: 13px;
+    padding: 11px 12px; outline: none;
+  }
+  #txInput:focus { border-color: var(--phos-dim); }
+  #txInput::placeholder { color: var(--ink-dim); }
+
+  .btnrow { display: flex; gap: 8px; }
+  button {
+    font-family: var(--mono); font-size: 12px; font-weight: 500;
+    letter-spacing: .04em;
+    border: 1px solid var(--line); border-radius: 7px;
+    background: var(--panel); color: var(--ink);
+    padding: 11px 13px; cursor: pointer;
+    transition: transform .06s, border-color .15s, background .15s;
+    -webkit-user-select: none; user-select: none;
+  }
+  button:active { transform: scale(.96); }
+  button.primary {
+    flex: 1 1 auto;
+    background: var(--phos); color: #04130c; border-color: var(--phos);
+    font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  }
+  button.primary.connected { background: var(--err); border-color: var(--err); color:#1a0606;}
+  button.primary.connecting { background: var(--amber); border-color: var(--amber); color:#1a1304;}
+  button.icon { flex: 0 0 auto; min-width: 46px; color: var(--ink-dim); }
+  button.icon.on { color: var(--phos); border-color: var(--phos-dim); }
+  button:disabled { opacity: .4; pointer-events: none; }
+  #sendBtn { flex: 0 0 auto; background: transparent; color: var(--tx); border-color:#1d3550; }
+
+  .hint {
+    font-size: 10.5px; color: var(--ink-dim); margin-top: 9px;
+    line-height: 1.5; text-align: center;
+  }
+  .hint a { color: var(--phos-dim); }
+</style>
+</head>
+<body>
+  <header>
+    <div class="titlebar">
+      <h1>BLE Serial Monitor</h1>
+      <span class="tag">FFE0·FFE1</span>
+    </div>
+    <div class="statusline">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">Disconnected</span>
+      <span id="deviceName"></span>
+    </div>
+  </header>
+
+  <div id="console"><span id="cursor"></span></div>
+
+  <footer>
+    <div class="stats">
+      <span>RX <b id="rxBytes">0</b> B</span>
+      <span>LINES <b id="lineCount">0</b></span>
+      <span>BAUD <b>n/a (BLE)</b></span>
+    </div>
+    <div class="sendrow">
+      <input id="txInput" type="text" placeholder="type to send to module…"
+             autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+      <button id="sendBtn">SEND</button>
+    </div>
+    <div class="btnrow">
+      <button id="connectBtn" class="primary">Connect</button>
+      <button id="tsBtn"     class="icon on" title="timestamps">⏱</button>
+      <button id="scrollBtn" class="icon on" title="autoscroll">⤓</button>
+      <button id="pauseBtn"  class="icon" title="pause">❚❚</button>
+      <button id="clearBtn"  class="icon" title="clear">⌫</button>
+      <button id="saveBtn"   class="icon" title="save log">⤴</button>
+    </div>
+    <div class="hint">
+      Runs in <b>Bluefy</b> (iOS Web-Bluetooth browser). Tap Connect, pick your
+      <b>DSD&nbsp;TECH</b> module. Newlines split lines automatically.
+    </div>
+  </footer>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---- HM-10 GATT identifiers ----
+  const SERVICE_UUID = 0xffe0;
+  const CHAR_UUID    = 0xffe1;
+
+  // ---- State ----
+  let device = null, server = null, characteristic = null;
+  let paused = false, autoscroll = true, showTs = true;
+  let rxBytes = 0, lineCount = 0;
+  let lineBuf = '';                 // accumulates partial lines across BLE chunks
+  const decoder = new TextDecoder('utf-8');
+  const encoder = new TextEncoder();
+
+  // ---- DOM ----
+  const $ = id => document.getElementById(id);
+  const consoleEl = $('console');
+  const cursor    = $('cursor');
+  const dot       = $('dot');
+  const statusText= $('statusText');
+  const deviceName= $('deviceName');
+
+  // ---- Logging ----
+  function stamp() {
+    const d = new Date();
+    const p = (n, l=2) => String(n).padStart(l, '0');
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(),3)}`;
+  }
+
+  function append(text, cls) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const ts = document.createElement('span');
+    ts.className = 'ts' + (showTs ? '' : ' hide');
+    ts.textContent = stamp();
+    const msg = document.createElement('span');
+    msg.className = 'msg ' + cls;
+    msg.textContent = text;
+    row.append(ts, msg);
+    consoleEl.insertBefore(row, cursor);
+    if (cls === 'rx' || cls === 'tx') { lineCount++; $('lineCount').textContent = lineCount; }
+    if (autoscroll && !paused) consoleEl.scrollTop = consoleEl.scrollHeight;
+    // keep DOM bounded
+    while (consoleEl.children.length > 2500) consoleEl.removeChild(consoleEl.firstChild);
+  }
+  const sys = t => append(t, 'sys');
+  const err = t => append(t, 'err');
+
+  // ---- Incoming notification handler ----
+  function onData(event) {
+    if (paused) return;
+    const bytes = event.target.value;            // DataView
+    rxBytes += bytes.byteLength;
+    $('rxBytes').textContent = rxBytes;
+    const chunk = decoder.decode(bytes, { stream: true });
+    lineBuf += chunk;
+    // split into complete lines; keep the remainder buffered
+    let idx;
+    while ((idx = lineBuf.search(/\r\n|\n|\r/)) !== -1) {
+      const line = lineBuf.slice(0, idx);
+      lineBuf = lineBuf.slice(idx + lineBuf.match(/\r\n|\n|\r/)[0].length);
+      append(line, 'rx');
+    }
+    // if a long stretch arrives with no newline, flush it so it isn't held forever
+    if (lineBuf.length > 512) { append(lineBuf, 'rx'); lineBuf = ''; }
+  }
+
+  // ---- Connect / disconnect ----
+  function setStatus(state, label) {
+    dot.className = 'dot' + (state ? ' ' + state : '');
+    statusText.textContent = label;
+  }
+
+  async function connect() {
+    if (!navigator.bluetooth) {
+      err('Web Bluetooth unavailable. Open this file in the Bluefy browser on iOS.');
+      return;
+    }
+    try {
+      setStatus('connecting', 'Requesting device…');
+      $('connectBtn').className = 'primary connecting';
+      $('connectBtn').textContent = '…';
+
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [SERVICE_UUID] }],
+        optionalServices: [SERVICE_UUID]
+      });
+      device.addEventListener('gattserverdisconnected', onDisconnect);
+
+      setStatus('connecting', 'Connecting…');
+      server = await device.gatt.connect();
+      const service = await server.getPrimaryService(SERVICE_UUID);
+      characteristic = await service.getCharacteristic(CHAR_UUID);
+      await characteristic.startNotifications();
+      characteristic.addEventListener('characteristicvaluechanged', onData);
+
+      setStatus('live', 'Connected');
+      deviceName.textContent = '· ' + (device.name || 'unknown');
+      $('connectBtn').className = 'primary connected';
+      $('connectBtn').textContent = 'Disconnect';
+      sys(`Connected to ${device.name || 'device'} — subscribed to FFE1, decoding UTF-8.`);
+    } catch (e) {
+      if (e && e.name === 'NotFoundError') { sys('Device selection cancelled.'); }
+      else { err('Connect failed: ' + (e.message || e)); }
+      resetUi();
+    }
+  }
+
+  function disconnect() {
+    if (device && device.gatt.connected) device.gatt.disconnect();
+    else onDisconnect();
+  }
+
+  function onDisconnect() {
+    sys('Disconnected.');
+    if (lineBuf) { append(lineBuf, 'rx'); lineBuf = ''; }
+    resetUi();
+  }
+
+  function resetUi() {
+    setStatus('', 'Disconnected');
+    deviceName.textContent = '';
+    $('connectBtn').className = 'primary';
+    $('connectBtn').textContent = 'Connect';
+    characteristic = null; server = null;
+  }
+
+  // ---- Send (write back to module) ----
+  async function send() {
+    const inp = $('txInput');
+    const text = inp.value;
+    if (!text) return;
+    if (!characteristic) { err('Not connected.'); return; }
+    try {
+      const data = encoder.encode(text);
+      // chunk to 20-byte BLE-safe writes
+      for (let i = 0; i < data.length; i += 20) {
+        const slice = data.slice(i, i + 20);
+        if (characteristic.writeValueWithoutResponse) await characteristic.writeValueWithoutResponse(slice);
+        else await characteristic.writeValue(slice);
+      }
+      append(text, 'tx');
+      inp.value = '';
+    } catch (e) { err('Send failed: ' + (e.message || e)); }
+  }
+
+  // ---- Save log ----
+  function saveLog() {
+    const lines = [...consoleEl.querySelectorAll('.row')].map(r => {
+      const t = r.querySelector('.ts').textContent;
+      const m = r.querySelector('.msg').textContent;
+      return (showTs ? t + '  ' : '') + m;
+    });
+    const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `serial-log-${Date.now()}.txt`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ---- Wire up controls ----
+  $('connectBtn').onclick = () => (characteristic || (device && device.gatt.connected)) ? disconnect() : connect();
+  $('sendBtn').onclick = send;
+  $('txInput').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+  $('pauseBtn').onclick = function () {
+    paused = !paused;
+    this.classList.toggle('on', paused);
+    this.textContent = paused ? '▶' : '❚❚';
+    sys(paused ? 'Paused (incoming data ignored).' : 'Resumed.');
+  };
+  $('scrollBtn').onclick = function () {
+    autoscroll = !autoscroll;
+    this.classList.toggle('on', autoscroll);
+    if (autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+  };
+  $('tsBtn').onclick = function () {
+    showTs = !showTs;
+    this.classList.toggle('on', showTs);
+    consoleEl.querySelectorAll('.ts').forEach(t => t.classList.toggle('hide', !showTs));
+  };
+  $('clearBtn').onclick = () => {
+    consoleEl.querySelectorAll('.row').forEach(r => r.remove());
+    rxBytes = 0; lineCount = 0; lineBuf = '';
+    $('rxBytes').textContent = '0'; $('lineCount').textContent = '0';
+  };
+  $('saveBtn').onclick = saveLog;
+
+  // ---- Boot ----
+  if (!navigator.bluetooth) {
+    sys('Web Bluetooth not detected. This page must run in Bluefy (iOS) or Chrome (desktop/Android).');
+  } else {
+    sys('Ready. Tap Connect and choose your DSD TECH module.');
+  }
+})();
+</script>
+</body>
+</html>
