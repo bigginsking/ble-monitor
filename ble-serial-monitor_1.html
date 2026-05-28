@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>BLE Serial Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#0a0e0d; --panel:#111715; --grid:#16201d; --line:#1d2b27;
+    --ink:#c8e6d8; --ink-dim:#5d7a70; --phos:#34e89e; --phos-dim:#1c7a55;
+    --amber:#e8b834; --tx:#4ea8e8; --err:#e85d5d;
+    --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --display:'Space Mono',var(--mono);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:var(--mono);-webkit-text-size-adjust:100%;}
+  body{display:flex;flex-direction:column;
+    background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+    background-size:22px 22px;background-position:center;}
+
+  header{flex:0 0 auto;padding:12px 16px 10px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(15,22,20,.95),rgba(10,14,13,.85));backdrop-filter:blur(6px);}
+  .titlebar{display:flex;align-items:center;gap:10px;}
+  .titlebar h1{font-family:var(--display);font-weight:700;font-size:14px;letter-spacing:.13em;
+    text-transform:uppercase;margin:0;}
+  .titlebar .tag{font-size:10px;letter-spacing:.16em;color:var(--phos-dim);
+    border:1px solid var(--line);border-radius:3px;padding:2px 6px;margin-left:auto;}
+  .statusline{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:12px;color:var(--ink-dim);}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--err);flex:0 0 auto;}
+  .dot.live{background:var(--phos);animation:pulse 2s infinite;}
+  .dot.connecting{background:var(--amber);animation:blink .7s infinite;}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(52,232,158,.45);}70%{box-shadow:0 0 0 7px rgba(52,232,158,0);}100%{box-shadow:0 0 0 0 rgba(52,232,158,0);}}
+  @keyframes blink{50%{opacity:.3;}}
+  #statusText{color:var(--ink);} #deviceName{color:var(--phos);}
+
+  /* segmented view switch */
+  .seg{display:flex;gap:0;margin-top:10px;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+  .seg button{flex:1 1 0;background:transparent;border:0;color:var(--ink-dim);
+    font-family:var(--mono);font-size:12px;letter-spacing:.06em;padding:8px 0;cursor:pointer;}
+  .seg button.active{background:var(--phos);color:#04130c;font-weight:600;}
+
+  main{flex:1 1 auto;position:relative;overflow:hidden;}
+  .view{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:none;}
+  .view.show{display:block;}
+
+  /* graph */
+  #graph{padding:12px 14px 18px;}
+  #graphEmpty{color:var(--ink-dim);font-size:12px;text-align:center;padding:40px 20px;line-height:1.6;font-style:italic;}
+  .bar{margin-bottom:11px;}
+  .bar-head{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;}
+  .bar-label{font-size:11.5px;color:var(--ink-dim);letter-spacing:.03em;flex:1 1 auto;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .bar-val{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;}
+  .bar-track{height:13px;background:var(--panel);border:1px solid var(--line);border-radius:4px;overflow:hidden;position:relative;}
+  .bar-fill{height:100%;width:0;border-radius:3px 0 0 3px;transition:width .12s ease-out;}
+  .spark{display:none;width:100%;height:22px;margin-top:3px;}
+  .spark.show{display:block;}
+  .spark polyline{fill:none;stroke-width:1.4;vector-effect:non-scaling-stroke;opacity:.8;}
+  .bar-range{font-size:9.5px;color:var(--ink-dim);margin-top:2px;font-variant-numeric:tabular-nums;opacity:.7;}
+
+  /* log */
+  #console{padding:12px 14px 16px;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word;}
+  .row{display:flex;gap:10px;padding:1px 0;}
+  .ts{flex:0 0 auto;color:var(--ink-dim);font-size:11px;padding-top:1px;user-select:none;}
+  .ts.hide{display:none;}
+  .msg{flex:1 1 auto;}
+  .msg.rx{color:var(--phos);} .msg.tx{color:var(--tx);}
+  .msg.sys{color:var(--ink-dim);font-style:italic;} .msg.err{color:var(--err);}
+  .msg.tx::before{content:'» ';color:var(--tx);opacity:.6;}
+  .msg.sys::before{content:'· ';opacity:.6;}
+
+  footer{flex:0 0 auto;border-top:1px solid var(--line);
+    background:linear-gradient(0deg,rgba(15,22,20,.96),rgba(10,14,13,.8));
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom));backdrop-filter:blur(6px);}
+  .stats{display:flex;gap:14px;font-size:10.5px;color:var(--ink-dim);letter-spacing:.05em;margin-bottom:9px;flex-wrap:wrap;}
+  .stats b{color:var(--phos);font-weight:600;}
+  .sendrow{display:flex;gap:8px;margin-bottom:9px;}
+  #txInput{flex:1 1 auto;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:7px;
+    color:var(--ink);font-family:var(--mono);font-size:13px;padding:11px 12px;outline:none;}
+  #txInput:focus{border-color:var(--phos-dim);}
+  #txInput::placeholder{color:var(--ink-dim);}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;}
+  button{font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.04em;
+    border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);
+    padding:11px 13px;cursor:pointer;transition:transform .06s,border-color .15s,background .15s;user-select:none;}
+  button:active{transform:scale(.96);}
+  button.primary{flex:1 1 auto;background:var(--phos);color:#04130c;border-color:var(--phos);
+    font-weight:600;letter-spacing:.08em;text-transform:uppercase;}
+  button.primary.connected{background:var(--err);border-color:var(--err);color:#1a0606;}
+  button.primary.connecting{background:var(--amber);border-color:var(--amber);color:#1a1304;}
+  button.icon{flex:0 0 auto;min-width:46px;color:var(--ink-dim);}
+  button.icon.on{color:var(--phos);border-color:var(--phos-dim);}
+  button:disabled{opacity:.4;pointer-events:none;}
+  #sendBtn{flex:0 0 auto;background:transparent;color:var(--tx);border-color:#1d3550;}
+  .hint{font-size:10.5px;color:var(--ink-dim);margin-top:9px;line-height:1.5;text-align:center;}
+</style>
+</head>
+<body>
+  <header>
+    <div class="titlebar">
+      <h1>BLE Serial Monitor</h1>
+      <span class="tag">FFE0·FFE1</span>
+    </div>
+    <div class="statusline">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">Disconnected</span>
+      <span id="deviceName"></span>
+    </div>
+    <div class="seg">
+      <button id="segGraph" class="active">▰ Graph</button>
+      <button id="segLog">▤ Log</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="view show" id="graphView">
+      <div id="graph"><div id="graphEmpty">Waiting for data…<br>Connect and the bars will build themselves from your CSV header row.</div></div>
+    </div>
+    <div class="view" id="logView">
+      <div id="console"></div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="stats">
+      <span>RX <b id="rxBytes">0</b> B</span>
+      <span>LINES <b id="lineCount">0</b></span>
+      <span>CHANS <b id="chanCount">0</b></span>
+    </div>
+    <div class="sendrow">
+      <input id="txInput" type="text" placeholder="type to send to module…"
+             autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+      <button id="sendBtn">SEND</button>
+    </div>
+    <div class="btnrow">
+      <button id="connectBtn" class="primary">Connect</button>
+      <button id="trendBtn" class="icon" title="trend sparklines">∿</button>
+      <button id="tsBtn"     class="icon on" title="timestamps">⏱</button>
+      <button id="scrollBtn" class="icon on" title="autoscroll">⤓</button>
+      <button id="pauseBtn"  class="icon" title="pause">❚❚</button>
+      <button id="clearBtn"  class="icon" title="clear">⌫</button>
+      <button id="saveBtn"   class="icon" title="save log">⤴</button>
+    </div>
+    <div class="hint">Bars auto-build from the CSV header. <b>*10</b> columns are auto-scaled to real units.</div>
+  </footer>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---- HM-10 GATT identifiers (full 128-bit form for max compatibility) ----
+  const SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb';
+  const CHAR_UUID    = '0000ffe1-0000-1000-8000-00805f9b34fb';
+
+  // ---- State ----
+  let device=null, server=null, characteristic=null;
+  let paused=false, autoscroll=true, showTs=true, showTrend=false;
+  let rxBytes=0, lineCount=0;
+  let lineBuf='';
+  const decoder=new TextDecoder('utf-8');
+  const encoder=new TextEncoder();
+
+  // ---- Graph model ----
+  const HIST=64;
+  let channels=[];   // {label, scale}
+  let ranges=[];     // {min,max}
+  let history=[];    // [Array]
+  let els=[];        // {fill,val,range,spark}
+
+  const $=id=>document.getElementById(id);
+  const consoleEl=$('console'), dot=$('dot');
+  const statusText=$('statusText'), deviceName=$('deviceName');
+  const graphEl=$('graph');
+
+  // ---- Logging ----
+  function stamp(){const d=new Date(),p=(n,l=2)=>String(n).padStart(l,'0');
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(),3)}`;}
+  function append(text,cls){
+    const row=document.createElement('div');row.className='row';
+    const ts=document.createElement('span');ts.className='ts'+(showTs?'':' hide');ts.textContent=stamp();
+    const msg=document.createElement('span');msg.className='msg '+cls;msg.textContent=text;
+    row.append(ts,msg);consoleEl.appendChild(row);
+    if(cls==='rx'||cls==='tx'){lineCount++;$('lineCount').textContent=lineCount;}
+    if(autoscroll&&!paused)consoleEl.scrollTop=consoleEl.scrollHeight;
+    while(consoleEl.children.length>2500)consoleEl.removeChild(consoleEl.firstChild);
+  }
+  const sys=t=>append(t,'sys'), err=t=>append(t,'err');
+
+  // ---- CSV / graph parsing ----
+  function accent(label){
+    const l=label.toLowerCase();
+    if(/rpm/.test(l))return '#34d6e8';
+    if(/current|amp/.test(l))return '#4ea8e8';
+    if(/vin|vout|volt|\bv\b/.test(l))return '#34e89e';
+    if(/temp|\bt\b|t f|t2|\bt[0-9]/.test(l))return '#e8a834';
+    return '#7a8f88';
+  }
+  function looksLikeHeader(tok){
+    const alpha=tok.filter(t=>/[a-zA-Z]/.test(t)).length;
+    return alpha>=Math.max(2,tok.length/2);
+  }
+  function fmt(v,scale){
+    if(!isFinite(v))return '–';
+    if(scale!==1)return v.toFixed(1);
+    return Number.isInteger(v)?String(v):v.toFixed(1);
+  }
+  function parseHeader(tok){
+    channels=tok.map(raw=>{
+      let label=raw.trim(), scale=1;
+      const m=label.match(/\*\s*([\d.]+)/);
+      if(m){const f=parseFloat(m[1]);if(f)scale=1/f;label=label.replace(/\*\s*[\d.]+/,'').trim();}
+      return {label,scale};
+    });
+    ranges=channels.map(()=>({min:Infinity,max:-Infinity}));
+    history=channels.map(()=>[]);
+    buildBars();
+    $('chanCount').textContent=channels.length;
+    sys(`Detected ${channels.length} channels from header.`);
+  }
+  function buildBars(){
+    graphEl.innerHTML='';els=[];
+    channels.forEach((c,i)=>{
+      const col=accent(c.label);
+      const bar=document.createElement('div');bar.className='bar';
+      bar.innerHTML=
+        `<div class="bar-head"><span class="bar-label">${c.label}</span>`+
+        `<span class="bar-val" style="color:${col}">–</span></div>`+
+        `<div class="bar-track"><div class="bar-fill" style="background:linear-gradient(90deg,${col}55,${col})"></div></div>`+
+        `<svg class="spark${showTrend?' show':''}" viewBox="0 0 100 22" preserveAspectRatio="none"><polyline style="stroke:${col}"/></svg>`+
+        `<div class="bar-range">–</div>`;
+      graphEl.appendChild(bar);
+      els.push({
+        fill:bar.querySelector('.bar-fill'),
+        val:bar.querySelector('.bar-val'),
+        range:bar.querySelector('.bar-range'),
+        spark:bar.querySelector('polyline'),
+        svg:bar.querySelector('.spark')
+      });
+    });
+  }
+  function updateBars(vals){
+    vals.forEach((raw,i)=>{
+      if(i>=channels.length)return;
+      const v=raw*channels[i].scale;
+      if(!isFinite(v))return;
+      const r=ranges[i];
+      if(v<r.min)r.min=v;if(v>r.max)r.max=v;
+      const h=history[i];h.push(v);if(h.length>HIST)h.shift();
+      const lo=Math.min(r.min,0), hi=Math.max(r.max,0), span=(hi-lo)||1;
+      const pct=Math.max(0,Math.min(1,(v-lo)/span))*100;
+      const e=els[i];if(!e)return;
+      e.fill.style.width=pct+'%';
+      e.val.textContent=fmt(v,channels[i].scale);
+      e.range.textContent=fmt(lo,channels[i].scale)+'  …  '+fmt(hi,channels[i].scale);
+      if(showTrend&&h.length>1){
+        const pts=h.map((val,idx)=>{
+          const x=(idx/(HIST-1))*100;
+          const y=22-((val-lo)/span)*22;
+          return x.toFixed(1)+','+y.toFixed(1);
+        }).join(' ');
+        e.spark.setAttribute('points',pts);
+      }
+    });
+  }
+  function handleLine(line){
+    const tok=line.split(',').map(s=>s.trim());
+    // drop a single trailing empty (trailing comma)
+    if(tok.length>1 && tok[tok.length-1]==='')tok.pop();
+    if(tok.length<2)return;
+    if(looksLikeHeader(tok)){parseHeader(tok);return;}
+    if(!channels.length){
+      channels=tok.map((_,i)=>({label:'ch'+i,scale:1}));
+      ranges=channels.map(()=>({min:Infinity,max:-Infinity}));
+      history=channels.map(()=>[]);buildBars();$('chanCount').textContent=channels.length;
+    }
+    updateBars(tok.map(t=>parseFloat(t)));
+  }
+
+  // ---- Incoming notifications ----
+  function onData(event){
+    if(paused)return;
+    const bytes=event.target.value;rxBytes+=bytes.byteLength;$('rxBytes').textContent=rxBytes;
+    lineBuf+=decoder.decode(bytes,{stream:true});
+    let m;
+    while((m=lineBuf.match(/\r\n|\n|\r/))!==null){
+      const idx=m.index;
+      const line=lineBuf.slice(0,idx);
+      lineBuf=lineBuf.slice(idx+m[0].length);
+      if(line.length){append(line,'rx');handleLine(line);}
+    }
+    if(lineBuf.length>512){append(lineBuf,'rx');handleLine(lineBuf);lineBuf='';}
+  }
+
+  // ---- Connect / disconnect (proven logic — do not alter) ----
+  function setStatus(state,label){dot.className='dot'+(state?' '+state:'');statusText.textContent=label;}
+  async function connect(){
+    if(!navigator.bluetooth){err('Web Bluetooth unavailable. Open this file in the Bluefy browser on iOS.');return;}
+    try{
+      setStatus('connecting','Requesting device…');
+      $('connectBtn').className='primary connecting';$('connectBtn').textContent='…';
+      device=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:[SERVICE_UUID,CHAR_UUID]});
+      sys(`Step 1 OK — selected "${device.name||'unnamed device'}".`);
+      device.addEventListener('gattserverdisconnected',onDisconnect);
+      setStatus('connecting','Connecting…');
+      server=await device.gatt.connect();sys('Step 2 OK — GATT connected.');
+      const service=await server.getPrimaryService(SERVICE_UUID);sys('Step 3 OK — found FFE0 service.');
+      characteristic=await service.getCharacteristic(CHAR_UUID);sys('Step 4 OK — found FFE1 characteristic.');
+      await characteristic.startNotifications();sys('Step 5 OK — notifications on.');
+      characteristic.addEventListener('characteristicvaluechanged',onData);
+      setStatus('live','Connected');deviceName.textContent='· '+(device.name||'unknown');
+      $('connectBtn').className='primary connected';$('connectBtn').textContent='Disconnect';
+      sys(`Connected — subscribed to FFE1, decoding UTF-8.`);
+    }catch(e){
+      const name=(e&&e.name)||'';
+      if(name==='NotFoundError')sys('No device chosen (picker cancelled, or no devices found nearby).');
+      else if(name==='SecurityError')err('Blocked: page must be HTTPS and Bluefy needs iOS Bluetooth permission (Settings → Bluefy → Bluetooth = ON).');
+      else if(name==='NotAllowedError')err('Bluetooth permission denied. Enable it in Settings → Bluefy → Bluetooth, then retry.');
+      else err(`Connect failed [${name||'unknown'}]: ${e&&e.message?e.message:e}`);
+      resetUi();
+    }
+  }
+  function disconnect(){if(device&&device.gatt.connected)device.gatt.disconnect();else onDisconnect();}
+  function onDisconnect(){sys('Disconnected.');if(lineBuf){append(lineBuf,'rx');handleLine(lineBuf);lineBuf='';}resetUi();}
+  function resetUi(){setStatus('','Disconnected');deviceName.textContent='';
+    $('connectBtn').className='primary';$('connectBtn').textContent='Connect';characteristic=null;server=null;}
+
+  // ---- Send ----
+  async function send(){
+    const inp=$('txInput'),text=inp.value;if(!text)return;
+    if(!characteristic){err('Not connected.');return;}
+    try{
+      const data=encoder.encode(text);
+      for(let i=0;i<data.length;i+=20){
+        const slice=data.slice(i,i+20);
+        if(characteristic.writeValueWithoutResponse)await characteristic.writeValueWithoutResponse(slice);
+        else await characteristic.writeValue(slice);
+      }
+      append(text,'tx');inp.value='';
+    }catch(e){err('Send failed: '+(e.message||e));}
+  }
+
+  // ---- Save ----
+  function saveLog(){
+    const lines=[...consoleEl.querySelectorAll('.row')].map(r=>{
+      const t=r.querySelector('.ts').textContent,mm=r.querySelector('.msg').textContent;
+      return (showTs?t+'  ':'')+mm;});
+    const blob=new Blob([lines.join('\n')+'\n'],{type:'text/plain'});
+    const url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download=`serial-log-${Date.now()}.txt`;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+
+  // ---- View switch ----
+  function showView(which){
+    $('graphView').classList.toggle('show',which==='graph');
+    $('logView').classList.toggle('show',which==='log');
+    $('segGraph').classList.toggle('active',which==='graph');
+    $('segLog').classList.toggle('active',which==='log');
+  }
+  $('segGraph').onclick=()=>showView('graph');
+  $('segLog').onclick=()=>showView('log');
+
+  // ---- Controls ----
+  $('connectBtn').onclick=()=>(characteristic||(device&&device.gatt.connected))?disconnect():connect();
+  $('sendBtn').onclick=send;
+  $('txInput').addEventListener('keydown',e=>{if(e.key==='Enter')send();});
+  $('trendBtn').onclick=function(){showTrend=!showTrend;this.classList.toggle('on',showTrend);
+    document.querySelectorAll('.spark').forEach(s=>s.classList.toggle('show',showTrend));};
+  $('pauseBtn').onclick=function(){paused=!paused;this.classList.toggle('on',paused);
+    this.textContent=paused?'▶':'❚❚';sys(paused?'Paused.':'Resumed.');};
+  $('scrollBtn').onclick=function(){autoscroll=!autoscroll;this.classList.toggle('on',autoscroll);
+    if(autoscroll)consoleEl.scrollTop=consoleEl.scrollHeight;};
+  $('tsBtn').onclick=function(){showTs=!showTs;this.classList.toggle('on',showTs);
+    consoleEl.querySelectorAll('.ts').forEach(t=>t.classList.toggle('hide',!showTs));};
+  $('clearBtn').onclick=()=>{
+    consoleEl.querySelectorAll('.row').forEach(r=>r.remove());
+    rxBytes=0;lineCount=0;lineBuf='';$('rxBytes').textContent='0';$('lineCount').textContent='0';
+    ranges=channels.map(()=>({min:Infinity,max:-Infinity}));history=channels.map(()=>[]);
+  };
+  $('saveBtn').onclick=saveLog;
+
+  // ---- Boot ----
+  if(!navigator.bluetooth)sys('Web Bluetooth not detected. Run in Bluefy (iOS) or Chrome (desktop/Android).');
+  else sys('Ready. Tap Connect and choose your DSD TECH module.');
+})();
+</script>
+</body>
+</html>
